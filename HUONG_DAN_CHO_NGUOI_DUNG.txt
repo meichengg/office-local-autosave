@@ -1,0 +1,23 @@
+HUONG DAN OFFICE LOCAL AUTOSAVE
+
+Cai dat:
+1. Double-click file INSTALL_ONCE.cmd
+2. Doi den khi man hinh bao Done
+3. Bam phim bat ky de dong cua so
+
+Sau khi cai xong:
+- Khong can chay lai sau khi khoi dong may.
+- Chuong trinh tu chay ngam moi lan dang nhap Windows.
+- Cu mo Word/Excel va lam viec binh thuong.
+- File da Save As se duoc tu dong luu neu co thay doi.
+
+Kiem tra neu can:
+- Double-click VERIFY.cmd
+
+Go cai dat:
+- Double-click UNINSTALL.cmd
+
+Luu y:
+- File moi tao chua Save As thi chua tu dong luu duoc.
+- Hay Save As file moi truoc, sau do autosave se tu hoat dong.
+- Chuong trinh khong can tai khoan Microsoft va khong can OneDrive.
