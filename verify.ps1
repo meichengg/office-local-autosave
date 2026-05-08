@@ -29,14 +29,16 @@ function Test-WatchdogRunning {
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     $runValue = Get-ItemProperty -Path $runKey -Name 'OfficeLocalAutoSave' -ErrorAction SilentlyContinue
     Assert ($null -ne $runValue) 'HKCU Run entry OfficeLocalAutoSave not found. Run install.ps1 first.'
+    Assert ($runValue.OfficeLocalAutoSave -like '*StartOfficeLocalAutoSave.vbs*') 'HKCU Run entry is old visible-console format. Run install.ps1 again.'
 
     $process = Get-WatchdogProcess
     if ($null -eq $process) {
         $scriptPath = Join-Path $Root 'OfficeLocalAutoSave.ps1'
+        $launcherPath = Join-Path $Root 'StartOfficeLocalAutoSave.vbs'
         Assert (Test-Path -LiteralPath $scriptPath) "Watchdog script not found: $scriptPath"
-        $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $args = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -IntervalSeconds 10 -BackupIntervalSeconds 3600 -BackupKeepDays 2 -BackupMaxMB 2048 -MinFreeSpaceMB 10240"
-        Start-Process -FilePath $ps -ArgumentList $args -WindowStyle Hidden | Out-Null
+        Assert (Test-Path -LiteralPath $launcherPath) "Hidden launcher not found: $launcherPath"
+        $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
+        Start-Process -FilePath $wscript -ArgumentList "//B `"$launcherPath`"" -WindowStyle Hidden | Out-Null
         Start-Sleep -Seconds 2
         $process = Get-WatchdogProcess
     }

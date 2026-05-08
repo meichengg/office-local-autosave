@@ -3,11 +3,11 @@
 Autosave local thật cho Word/Excel Windows không cần Microsoft account/OneDrive.
 
 Cơ chế: PowerShell watchdog chạy nền mỗi vài giây, attach vào instance Word/Excel đang mở qua COM, nếu file đã có path local và đang modified thì tạo backup rồi gọi Save.
-Installer dùng `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, không cần quyền admin.
+Installer dùng `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` trỏ tới launcher VBScript chạy ẩn, không cần quyền admin và không bật cửa sổ PowerShell sau reboot.
 
 ## Cài đặt trên Windows
 
-Cho người dùng lowtech: double-click `INSTALL_ONCE.cmd` một lần là xong. Sau reboot không cần chạy lại; watchdog tự chạy theo user Windows hiện tại.
+Cho người dùng lowtech: double-click `INSTALL_ONCE.cmd` một lần là xong. Sau reboot không cần chạy lại; watchdog tự chạy ẩn theo user Windows hiện tại.
 
 Mở PowerShell bình thường, không cần admin:
 

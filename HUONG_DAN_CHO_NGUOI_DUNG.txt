@@ -7,7 +7,7 @@ Cai dat:
 
 Sau khi cai xong:
 - Khong can chay lai sau khi khoi dong may.
-- Chuong trinh tu chay ngam moi lan dang nhap Windows.
+- Chuong trinh tu chay ngam moi lan dang nhap Windows, khong hien cua so.
 - Cu mo Word/Excel va lam viec binh thuong.
 - File da Save As se duoc tu dong luu neu co thay doi.
 
