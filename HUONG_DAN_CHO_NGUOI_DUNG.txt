@@ -10,7 +10,7 @@ Sau khi cài xong:
 - Không cần chạy lại sau khi khởi động máy.
 - Chương trình tự chạy ngầm mỗi lần bất kỳ user nào đăng nhập Windows, không hiện cửa sổ.
 - Cứ mở Word/Excel và làm việc bình thường.
-- File đã Save As sẽ được tự động lưu nếu có thay đổi và người dùng đã ngừng gõ/di chuột khoảng 10 giây.
+- File đã Save As sẽ được tự động lưu nếu có thay đổi và người dùng đã ngừng gõ/di chuột khoảng 1 giây.
 - Chương trình không ép lưu đúng lúc đang gõ để tránh làm Word/Excel bị đứng khung.
 
 Kiểm tra nếu cần:

@@ -1,11 +1,13 @@
 param(
     [int]$IntervalSeconds = 1,
     [int]$MinIdleSeconds = 3,
-    [int]$ForegroundMinIdleSeconds = 10,
+    [int]$ForegroundMinIdleSeconds = 1,
     [int]$BackupIntervalSeconds = 3600,
     [int]$BackupKeepDays = 2,
     [int]$BackupMaxMB = 2048,
-    [int]$MinFreeSpaceMB = 10240
+    [int]$MinFreeSpaceMB = 10240,
+    [int]$LogMaxKB = 1024,
+    [int]$LogKeepCount = 3
 )
 
 Set-StrictMode -Version Latest
@@ -18,6 +20,7 @@ $StatePath = Join-Path $Root 'state.json'
 New-Item -ItemType Directory -Force -Path $Root, $BackupRoot | Out-Null
 $BackupMaxBytes = [int64]$BackupMaxMB * 1MB
 $MinFreeSpaceBytes = [int64]$MinFreeSpaceMB * 1MB
+$LogMaxBytes = [int64]$LogMaxKB * 1KB
 
 $State = @{}
 if (Test-Path $StatePath) {
@@ -28,10 +31,42 @@ if (Test-Path $StatePath) {
         }
     } catch { $State = @{} }
 }
+$SkipLogState = @{}
+
+function Rotate-LogIfNeeded {
+    if ($LogMaxBytes -le 0 -or -not (Test-Path -LiteralPath $LogPath)) { return }
+    try {
+        $logFile = Get-Item -LiteralPath $LogPath
+        if ([int64]$logFile.Length -lt $LogMaxBytes) { return }
+        if ($LogKeepCount -le 0) {
+            Remove-Item -LiteralPath $LogPath -Force -ErrorAction SilentlyContinue
+            return
+        }
+        Remove-Item -LiteralPath "$LogPath.$LogKeepCount" -Force -ErrorAction SilentlyContinue
+        for ($i = $LogKeepCount - 1; $i -ge 1; $i--) {
+            $source = "$LogPath.$i"
+            if (Test-Path -LiteralPath $source) {
+                Move-Item -LiteralPath $source -Destination "$LogPath.$($i + 1)" -Force
+            }
+        }
+        Move-Item -LiteralPath $LogPath -Destination "$LogPath.1" -Force
+    } catch {}
+}
 
 function Log($msg) {
+    Rotate-LogIfNeeded
     $line = "{0} {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg
     Add-Content -Path $LogPath -Value $line -Encoding UTF8
+}
+
+function Log-Throttled($key, $msg, $seconds = 30) {
+    $now = Get-Date
+    if ($SkipLogState.ContainsKey($key)) {
+        $last = [datetime]$SkipLogState[$key]
+        if (($now - $last).TotalSeconds -lt $seconds) { return }
+    }
+    $SkipLogState[$key] = $now.ToString('o')
+    Log $msg
 }
 
 $IdleApiAvailable = $true
@@ -86,24 +121,12 @@ function Test-UserIdleForAutosave {
     return ((Get-UserIdleSeconds) -ge $MinIdleSeconds)
 }
 
-function Test-SafeToProbeOffice {
-    $idleSeconds = Get-UserIdleSeconds
-    if ($idleSeconds -lt $MinIdleSeconds) { return $false }
-    $foregroundPid = Get-ForegroundProcessId
-    if ($foregroundPid -eq 0) { return $true }
-    try {
-        $processName = (Get-Process -Id $foregroundPid -ErrorAction SilentlyContinue).ProcessName
-        if (($processName -eq 'WINWORD' -or $processName -eq 'EXCEL') -and $idleSeconds -lt $ForegroundMinIdleSeconds) { return $false }
-    } catch {}
-    return $true
-}
-
 function Get-WindowProcessId($hwnd) {
     if ($null -eq $hwnd -or $hwnd -eq [IntPtr]::Zero) { return 0 }
     try {
-        $pid = [uint32]0
-        [void][OfficeLocalAutoSaveInput]::GetWindowThreadProcessId([IntPtr]$hwnd, [ref]$pid)
-        return [int]$pid
+        $windowProcessId = [uint32]0
+        [void][OfficeLocalAutoSaveInput]::GetWindowThreadProcessId([IntPtr]$hwnd, [ref]$windowProcessId)
+        return [int]$windowProcessId
     } catch {
         return 0
     }
@@ -120,22 +143,36 @@ function Get-ForegroundProcessId {
 
 function Get-OfficeProcessId($app) {
     try {
-        return (Get-WindowProcessId ([IntPtr]$app.Hwnd))
-    } catch {
-        return 0
-    }
-}
-
-function Test-OfficeForeground($app) {
-    $foregroundPid = Get-ForegroundProcessId
-    $officePid = Get-OfficeProcessId $app
-    return ($officePid -ne 0 -and $foregroundPid -eq $officePid)
+        $windowProcessId = Get-WindowProcessId ([IntPtr]$app.Hwnd)
+        if ($windowProcessId -ne 0) { return $windowProcessId }
+    } catch {}
+    try {
+        $windowProcessId = Get-WindowProcessId ([IntPtr]$app.ActiveWindow.Hwnd)
+        if ($windowProcessId -ne 0) { return $windowProcessId }
+    } catch {}
+    try {
+        foreach ($window in @($app.Windows)) {
+            try {
+                $windowProcessId = Get-WindowProcessId ([IntPtr]$window.Hwnd)
+                if ($windowProcessId -ne 0) { return $windowProcessId }
+            } finally {
+                try { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($window) } catch {}
+            }
+        }
+    } catch {}
+    return 0
 }
 
 function Test-OfficeSafeToSave($app) {
-    $idleSeconds = Get-UserIdleSeconds
-    if ($idleSeconds -lt $MinIdleSeconds) { return $false }
-    if ((Test-OfficeForeground $app) -and $idleSeconds -lt $ForegroundMinIdleSeconds) { return $false }
+    $foregroundPid = Get-ForegroundProcessId
+    $officePid = Get-OfficeProcessId $app
+    if ($foregroundPid -eq 0 -or $officePid -eq 0) {
+        Log-Throttled "Office|pid_unknown|$foregroundPid|$officePid" "Office save guarded pid_unknown foregroundPid=$foregroundPid officePid=$officePid"
+        return (Test-UserIdleForAutosave)
+    }
+    if ($foregroundPid -eq $officePid) {
+        return ((Get-UserIdleSeconds) -ge $ForegroundMinIdleSeconds)
+    }
     return $true
 }
 
@@ -202,14 +239,6 @@ function Get-BackupFiles {
     return @(Get-ChildItem -Path $BackupRoot -Recurse -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime)
 }
 
-function Get-BackupBytes {
-    $total = [int64]0
-    foreach ($file in Get-BackupFiles) {
-        $total += [int64]$file.Length
-    }
-    return $total
-}
-
 function Get-BackupDriveFreeBytes {
     $qualifier = Split-Path -Path $BackupRoot -Qualifier
     if ([string]::IsNullOrWhiteSpace($qualifier)) { return [int64]::MaxValue }
@@ -250,7 +279,6 @@ function Release-Com($obj) {
 }
 
 function Save-Word {
-    if (-not (Test-SafeToProbeOffice)) { return }
     try { $word = [Runtime.InteropServices.Marshal]::GetActiveObject('Word.Application') } catch { return }
     if ($null -eq $word) { return }
     try {
@@ -258,16 +286,24 @@ function Save-Word {
         foreach ($doc in @($word.Documents)) {
             try {
                 if (-not (Test-OfficeSafeToSave $word)) { return }
-                if ($doc.Path -and -not $doc.ReadOnly -and -not $doc.Saved) {
-                    $fullName = $doc.FullName
-                    Ensure-Backup 'Word' $fullName
-                    if (-not (Test-OfficeSafeToSave $word)) {
-                        Log "Word save deferred active_input file=$fullName"
-                        continue
-                    }
-                    $doc.Save()
-                    Log "Word saved $fullName"
+                if ($doc.Saved) { continue }
+                $docName = $doc.Name
+                if (-not $doc.Path) {
+                    Log-Throttled "Word|no_path|$docName" "Word save skipped no_path name=$docName"
+                    continue
                 }
+                $fullName = $doc.FullName
+                if ($doc.ReadOnly) {
+                    Log-Throttled "Word|read_only|$fullName" "Word save skipped read_only file=$fullName"
+                    continue
+                }
+                Ensure-Backup 'Word' $fullName
+                if (-not (Test-OfficeSafeToSave $word)) {
+                    Log "Word save deferred active_input file=$fullName"
+                    continue
+                }
+                $doc.Save()
+                Log "Word saved $fullName"
             } catch { Log "Word error $($_.Exception.Message)" }
             finally { Release-Com $doc }
         }
@@ -277,7 +313,6 @@ function Save-Word {
 }
 
 function Save-Excel {
-    if (-not (Test-SafeToProbeOffice)) { return }
     try { $excel = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application') } catch { return }
     if ($null -eq $excel) { return }
     try {
@@ -286,25 +321,33 @@ function Save-Excel {
         foreach ($wb in @($excel.Workbooks)) {
             try {
                 if (-not (Test-OfficeSafeToSave $excel)) { return }
-                if ($wb.Path -and -not $wb.ReadOnly -and -not $wb.Saved) {
-                    $fullName = $wb.FullName
-                    Ensure-Backup 'Excel' $fullName
-                    if (-not (Test-OfficeSafeToSave $excel)) {
-                        Log "Excel save deferred active_input file=$fullName"
-                        continue
-                    }
-                    try {
-                        if ($excel.Ready -eq $false) {
-                            Log "Excel save deferred busy file=$fullName"
-                            continue
-                        }
-                    } catch {
+                if ($wb.Saved) { continue }
+                $wbName = $wb.Name
+                if (-not $wb.Path) {
+                    Log-Throttled "Excel|no_path|$wbName" "Excel save skipped no_path name=$wbName"
+                    continue
+                }
+                $fullName = $wb.FullName
+                if ($wb.ReadOnly) {
+                    Log-Throttled "Excel|read_only|$fullName" "Excel save skipped read_only file=$fullName"
+                    continue
+                }
+                Ensure-Backup 'Excel' $fullName
+                if (-not (Test-OfficeSafeToSave $excel)) {
+                    Log "Excel save deferred active_input file=$fullName"
+                    continue
+                }
+                try {
+                    if ($excel.Ready -eq $false) {
                         Log "Excel save deferred busy file=$fullName"
                         continue
                     }
-                    $wb.Save()
-                    Log "Excel saved $fullName"
+                } catch {
+                    Log "Excel save deferred busy file=$fullName"
+                    continue
                 }
+                $wb.Save()
+                Log "Excel saved $fullName"
             } catch { Log "Excel error $($_.Exception.Message)" }
             finally { Release-Com $wb }
         }
@@ -315,17 +358,15 @@ function Save-Excel {
 
 $MaintenanceIntervalSeconds = 900
 $LastMaintenance = [datetime]::MinValue
-Log "watchdog started interval=${IntervalSeconds}s idle=${MinIdleSeconds}s foreground_idle=${ForegroundMinIdleSeconds}s backup=${BackupIntervalSeconds}s keep=${BackupKeepDays}d quota=${BackupMaxMB}MB minfree=${MinFreeSpaceMB}MB"
+Log "watchdog started interval=${IntervalSeconds}s idle=${MinIdleSeconds}s foreground_idle=${ForegroundMinIdleSeconds}s backup=${BackupIntervalSeconds}s keep=${BackupKeepDays}d quota=${BackupMaxMB}MB minfree=${MinFreeSpaceMB}MB logmax=${LogMaxKB}KB logkeep=${LogKeepCount}"
 while ($true) {
-    if (Test-SafeToProbeOffice) {
-        try { Save-Word } catch {}
-        try { Save-Excel } catch {}
-        $now = Get-Date
-        if (($now - $LastMaintenance).TotalSeconds -ge $MaintenanceIntervalSeconds) {
-            try { Cleanup-Backups } catch {}
-            $LastMaintenance = $now
-        }
-        try { $State | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8 } catch {}
+    try { Save-Word } catch {}
+    try { Save-Excel } catch {}
+    $now = Get-Date
+    if (($now - $LastMaintenance).TotalSeconds -ge $MaintenanceIntervalSeconds) {
+        try { Cleanup-Backups } catch {}
+        $LastMaintenance = $now
     }
+    try { $State | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8 } catch {}
     Start-Sleep -Seconds $IntervalSeconds
 }

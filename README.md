@@ -18,11 +18,12 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 Mặc định:
 
 - Kiểm tra nhẹ mỗi 1 giây, chỉ Save nếu file thay đổi và người dùng idle tối thiểu 3 giây.
-- Nếu Word/Excel đang là cửa sổ đang dùng, chỉ Save sau khi idle tối thiểu 10 giây để tránh đứng khi đang gõ.
+- Nếu Word/Excel đang là cửa sổ đang dùng, chỉ Save sau khi idle tối thiểu 1 giây để tránh đứng khi đang gõ.
 - Backup snapshot tối đa mỗi 1 giờ trước khi save.
 - Giữ backup 2 ngày.
 - Tổng dung lượng backup tối đa 2GB.
 - Luôn giữ trống tối thiểu 10GB trên ổ chứa backup; nếu không đủ thì bỏ qua backup nhưng vẫn save file gốc.
+- Log tự xoay vòng tối đa 1MB x 4 file để không phình vô hạn.
 - Log: `%LOCALAPPDATA%\OfficeLocalAutoSave\autosave.log`
 - Backup: `%LOCALAPPDATA%\OfficeLocalAutoSave\Backups`
 - File cài đặt chung: `%ProgramData%\OfficeLocalAutoSave`
@@ -49,18 +50,18 @@ Test thủ công:
 
 1. Mở một file `.docx` hoặc `.xlsx` đã Save As local.
 2. Sửa nội dung, không bấm Save.
-3. Ngừng gõ/di chuột và chờ 15-25 giây.
+3. Ngừng gõ/di chuột và chờ vài giây.
 4. Mở log kiểm tra có dòng `saved`.
 5. Kill Word/Excel từ Task Manager rồi mở lại file, nội dung phải còn.
 
 Muốn đổi nhịp save/backup/quota:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -IntervalSeconds 1 -MinIdleSeconds 3 -ForegroundMinIdleSeconds 10 -BackupIntervalSeconds 3600 -BackupKeepDays 2 -BackupMaxMB 2048 -MinFreeSpaceMB 10240
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -IntervalSeconds 1 -MinIdleSeconds 3 -ForegroundMinIdleSeconds 1 -BackupIntervalSeconds 3600 -BackupKeepDays 2 -BackupMaxMB 2048 -MinFreeSpaceMB 10240 -LogMaxKB 1024 -LogKeepCount 3
 powershell -ExecutionPolicy Bypass -File .\verify.ps1 -WaitSeconds 25
 ```
 
-`IntervalSeconds` là nhịp kiểm tra an toàn nhẹ. `MinIdleSeconds` là thời gian tối thiểu không có input bàn phím/chuột trước khi watchdog được phép gọi Office Save. `ForegroundMinIdleSeconds` là thời gian idle tối thiểu khi Word/Excel đang là cửa sổ foreground, để tránh đứng khi đang gõ. File gốc được save ngay khi có thay đổi và đã idle đủ lâu, không ép Save đúng lúc người dùng đang thao tác. `BackupIntervalSeconds` là khoảng cách tối thiểu giữa 2 bản backup snapshot cho cùng một file. `BackupMaxMB` là quota tổng backup. `MinFreeSpaceMB` là mức dung lượng trống tối thiểu phải giữ lại.
+`IntervalSeconds` là nhịp kiểm tra an toàn nhẹ. `MinIdleSeconds` là thời gian tối thiểu không có input bàn phím/chuột trước khi watchdog được phép gọi Office Save. `ForegroundMinIdleSeconds` là thời gian idle tối thiểu khi Word/Excel đang là cửa sổ foreground, để tránh đứng khi đang gõ. File gốc được save ngay khi có thay đổi và đã idle đủ lâu, không ép Save đúng lúc người dùng đang thao tác. `BackupIntervalSeconds` là khoảng cách tối thiểu giữa 2 bản backup snapshot cho cùng một file. `BackupMaxMB` là quota tổng backup. `MinFreeSpaceMB` là mức dung lượng trống tối thiểu phải giữ lại. `LogMaxKB` là dung lượng tối đa của file log hiện tại trước khi xoay vòng. `LogKeepCount` là số file log cũ được giữ lại.
 
 ## Lưu ý
 

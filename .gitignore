@@ -1,0 +1,10 @@
+*.log
+*.tmp
+*.bak
+~$*
+initial.docx
+initial.xlsx
+OfficeLocalAutoSaveTest/
+Backups/
+state.json
+autosave.log*

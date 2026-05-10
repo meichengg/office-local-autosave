@@ -1,11 +1,13 @@
 param(
     [int]$IntervalSeconds = 1,
     [int]$MinIdleSeconds = 3,
-    [int]$ForegroundMinIdleSeconds = 10,
+    [int]$ForegroundMinIdleSeconds = 1,
     [int]$BackupIntervalSeconds = 3600,
     [int]$BackupKeepDays = 2,
     [int]$BackupMaxMB = 2048,
     [int]$MinFreeSpaceMB = 10240,
+    [int]$LogMaxKB = 1024,
+    [int]$LogKeepCount = 3,
     [switch]$SkipStart
 )
 
@@ -49,7 +51,7 @@ function Remove-LegacyRunEntries {
 if (-not (Test-Admin)) {
     $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $self = $MyInvocation.MyCommand.Path
-    $elevatedArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$self`" -IntervalSeconds $IntervalSeconds -MinIdleSeconds $MinIdleSeconds -ForegroundMinIdleSeconds $ForegroundMinIdleSeconds -BackupIntervalSeconds $BackupIntervalSeconds -BackupKeepDays $BackupKeepDays -BackupMaxMB $BackupMaxMB -MinFreeSpaceMB $MinFreeSpaceMB -SkipStart"
+    $elevatedArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$self`" -IntervalSeconds $IntervalSeconds -MinIdleSeconds $MinIdleSeconds -ForegroundMinIdleSeconds $ForegroundMinIdleSeconds -BackupIntervalSeconds $BackupIntervalSeconds -BackupKeepDays $BackupKeepDays -BackupMaxMB $BackupMaxMB -MinFreeSpaceMB $MinFreeSpaceMB -LogMaxKB $LogMaxKB -LogKeepCount $LogKeepCount -SkipStart"
     try {
         $process = Start-Process -FilePath $ps -ArgumentList $elevatedArgs -Verb RunAs -Wait -PassThru
         if ($process.ExitCode -eq 0) {
@@ -71,7 +73,7 @@ Copy-Item -LiteralPath $ScriptSrc -Destination $ScriptDst -Force
 
 $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
-$args = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptDst`" -IntervalSeconds $IntervalSeconds -MinIdleSeconds $MinIdleSeconds -ForegroundMinIdleSeconds $ForegroundMinIdleSeconds -BackupIntervalSeconds $BackupIntervalSeconds -BackupKeepDays $BackupKeepDays -BackupMaxMB $BackupMaxMB -MinFreeSpaceMB $MinFreeSpaceMB"
+$args = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptDst`" -IntervalSeconds $IntervalSeconds -MinIdleSeconds $MinIdleSeconds -ForegroundMinIdleSeconds $ForegroundMinIdleSeconds -BackupIntervalSeconds $BackupIntervalSeconds -BackupKeepDays $BackupKeepDays -BackupMaxMB $BackupMaxMB -MinFreeSpaceMB $MinFreeSpaceMB -LogMaxKB $LogMaxKB -LogKeepCount $LogKeepCount"
 $psCommand = "`"$ps`" $args"
 $vbsCommand = $psCommand.Replace('"', '""')
 $launcher = @"
