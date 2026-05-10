@@ -1,23 +1,25 @@
-HUONG DAN OFFICE LOCAL AUTOSAVE
+HƯỚNG DẪN OFFICE LOCAL AUTOSAVE
 
-Cai dat:
+Cài đặt:
 1. Double-click file INSTALL_ONCE.cmd
-2. Doi den khi man hinh bao Done
-3. Bam phim bat ky de dong cua so
+2. Bấm Yes nếu Windows hỏi quyền Administrator
+3. Đợi đến khi màn hình báo Done
+4. Bấm phím bất kỳ để đóng cửa sổ
 
-Sau khi cai xong:
-- Khong can chay lai sau khi khoi dong may.
-- Chuong trinh tu chay ngam moi lan dang nhap Windows, khong hien cua so.
-- Cu mo Word/Excel va lam viec binh thuong.
-- File da Save As se duoc tu dong luu neu co thay doi.
+Sau khi cài xong:
+- Không cần chạy lại sau khi khởi động máy.
+- Chương trình tự chạy ngầm mỗi lần bất kỳ user nào đăng nhập Windows, không hiện cửa sổ.
+- Cứ mở Word/Excel và làm việc bình thường.
+- File đã Save As sẽ được tự động lưu nếu có thay đổi và người dùng đã ngừng gõ/di chuột khoảng 10 giây.
+- Chương trình không ép lưu đúng lúc đang gõ để tránh làm Word/Excel bị đứng khung.
 
-Kiem tra neu can:
+Kiểm tra nếu cần:
 - Double-click VERIFY.cmd
 
-Go cai dat:
+Gỡ cài đặt:
 - Double-click UNINSTALL.cmd
 
-Luu y:
-- File moi tao chua Save As thi chua tu dong luu duoc.
-- Hay Save As file moi truoc, sau do autosave se tu hoat dong.
-- Chuong trinh khong can tai khoan Microsoft va khong can OneDrive.
+Lưu ý:
+- File mới tạo chưa Save As thì chưa tự động lưu được.
+- Hãy Save As file mới trước, sau đó autosave sẽ tự hoạt động.
+- Chương trình không cần tài khoản Microsoft và không cần OneDrive.

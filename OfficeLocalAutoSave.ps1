@@ -1,5 +1,7 @@
 param(
-    [int]$IntervalSeconds = 10,
+    [int]$IntervalSeconds = 1,
+    [int]$MinIdleSeconds = 3,
+    [int]$ForegroundMinIdleSeconds = 10,
     [int]$BackupIntervalSeconds = 3600,
     [int]$BackupKeepDays = 2,
     [int]$BackupMaxMB = 2048,
@@ -30,6 +32,111 @@ if (Test-Path $StatePath) {
 function Log($msg) {
     $line = "{0} {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg
     Add-Content -Path $LogPath -Value $line -Encoding UTF8
+}
+
+$IdleApiAvailable = $true
+try {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class OfficeLocalAutoSaveInput
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LASTINPUTINFO
+    {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("kernel32.dll")]
+    public static extern uint GetTickCount();
+}
+"@ -ErrorAction Stop
+} catch {
+    $IdleApiAvailable = $false
+    Log "idle api unavailable error=$($_.Exception.Message)"
+}
+
+function Get-UserIdleSeconds {
+    if (-not $IdleApiAvailable) { return 0 }
+    try {
+        $info = New-Object OfficeLocalAutoSaveInput+LASTINPUTINFO
+        $info.cbSize = [uint32][Runtime.InteropServices.Marshal]::SizeOf($info)
+        if (-not [OfficeLocalAutoSaveInput]::GetLastInputInfo([ref]$info)) { return 0 }
+        $nowTick = [uint64][OfficeLocalAutoSaveInput]::GetTickCount()
+        $lastTick = [uint64]$info.dwTime
+        if ($nowTick -lt $lastTick) { $nowTick += [uint64]4294967296 }
+        return [int](($nowTick - $lastTick) / 1000)
+    } catch {
+        return 0
+    }
+}
+
+function Test-UserIdleForAutosave {
+    return ((Get-UserIdleSeconds) -ge $MinIdleSeconds)
+}
+
+function Test-SafeToProbeOffice {
+    $idleSeconds = Get-UserIdleSeconds
+    if ($idleSeconds -lt $MinIdleSeconds) { return $false }
+    $foregroundPid = Get-ForegroundProcessId
+    if ($foregroundPid -eq 0) { return $true }
+    try {
+        $processName = (Get-Process -Id $foregroundPid -ErrorAction SilentlyContinue).ProcessName
+        if (($processName -eq 'WINWORD' -or $processName -eq 'EXCEL') -and $idleSeconds -lt $ForegroundMinIdleSeconds) { return $false }
+    } catch {}
+    return $true
+}
+
+function Get-WindowProcessId($hwnd) {
+    if ($null -eq $hwnd -or $hwnd -eq [IntPtr]::Zero) { return 0 }
+    try {
+        $pid = [uint32]0
+        [void][OfficeLocalAutoSaveInput]::GetWindowThreadProcessId([IntPtr]$hwnd, [ref]$pid)
+        return [int]$pid
+    } catch {
+        return 0
+    }
+}
+
+function Get-ForegroundProcessId {
+    if (-not $IdleApiAvailable) { return 0 }
+    try {
+        return (Get-WindowProcessId ([OfficeLocalAutoSaveInput]::GetForegroundWindow()))
+    } catch {
+        return 0
+    }
+}
+
+function Get-OfficeProcessId($app) {
+    try {
+        return (Get-WindowProcessId ([IntPtr]$app.Hwnd))
+    } catch {
+        return 0
+    }
+}
+
+function Test-OfficeForeground($app) {
+    $foregroundPid = Get-ForegroundProcessId
+    $officePid = Get-OfficeProcessId $app
+    return ($officePid -ne 0 -and $foregroundPid -eq $officePid)
+}
+
+function Test-OfficeSafeToSave($app) {
+    $idleSeconds = Get-UserIdleSeconds
+    if ($idleSeconds -lt $MinIdleSeconds) { return $false }
+    if ((Test-OfficeForeground $app) -and $idleSeconds -lt $ForegroundMinIdleSeconds) { return $false }
+    return $true
 }
 
 function SafeName($s) {
@@ -137,44 +244,88 @@ function Ensure-BackupQuota($requiredBytes) {
 }
 
 function Release-Com($obj) {
-    if ($null -ne $obj) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($obj) }
+    if ($null -ne $obj) {
+        try { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($obj) } catch {}
+    }
 }
 
 function Save-Word {
-    $word = [Runtime.InteropServices.Marshal]::GetActiveObject('Word.Application')
+    if (-not (Test-SafeToProbeOffice)) { return }
+    try { $word = [Runtime.InteropServices.Marshal]::GetActiveObject('Word.Application') } catch { return }
     if ($null -eq $word) { return }
-    foreach ($doc in @($word.Documents)) {
-        try {
-            if ($doc.Path -and -not $doc.ReadOnly -and -not $doc.Saved) {
-                Ensure-Backup 'Word' $doc.FullName
-                $doc.Save()
-                Log "Word saved $($doc.FullName)"
-            }
-        } catch { Log "Word error $($_.Exception.Message)" }
+    try {
+        if (-not (Test-OfficeSafeToSave $word)) { return }
+        foreach ($doc in @($word.Documents)) {
+            try {
+                if (-not (Test-OfficeSafeToSave $word)) { return }
+                if ($doc.Path -and -not $doc.ReadOnly -and -not $doc.Saved) {
+                    $fullName = $doc.FullName
+                    Ensure-Backup 'Word' $fullName
+                    if (-not (Test-OfficeSafeToSave $word)) {
+                        Log "Word save deferred active_input file=$fullName"
+                        continue
+                    }
+                    $doc.Save()
+                    Log "Word saved $fullName"
+                }
+            } catch { Log "Word error $($_.Exception.Message)" }
+            finally { Release-Com $doc }
+        }
+    } finally {
+        Release-Com $word
     }
-    Release-Com $word
 }
 
 function Save-Excel {
-    $excel = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
+    if (-not (Test-SafeToProbeOffice)) { return }
+    try { $excel = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application') } catch { return }
     if ($null -eq $excel) { return }
-    foreach ($wb in @($excel.Workbooks)) {
-        try {
-            if ($wb.Path -and -not $wb.ReadOnly -and -not $wb.Saved) {
-                Ensure-Backup 'Excel' $wb.FullName
-                $wb.Save()
-                Log "Excel saved $($wb.FullName)"
-            }
-        } catch { Log "Excel error $($_.Exception.Message)" }
+    try {
+        if (-not (Test-OfficeSafeToSave $excel)) { return }
+        try { if ($excel.Ready -eq $false) { return } } catch { return }
+        foreach ($wb in @($excel.Workbooks)) {
+            try {
+                if (-not (Test-OfficeSafeToSave $excel)) { return }
+                if ($wb.Path -and -not $wb.ReadOnly -and -not $wb.Saved) {
+                    $fullName = $wb.FullName
+                    Ensure-Backup 'Excel' $fullName
+                    if (-not (Test-OfficeSafeToSave $excel)) {
+                        Log "Excel save deferred active_input file=$fullName"
+                        continue
+                    }
+                    try {
+                        if ($excel.Ready -eq $false) {
+                            Log "Excel save deferred busy file=$fullName"
+                            continue
+                        }
+                    } catch {
+                        Log "Excel save deferred busy file=$fullName"
+                        continue
+                    }
+                    $wb.Save()
+                    Log "Excel saved $fullName"
+                }
+            } catch { Log "Excel error $($_.Exception.Message)" }
+            finally { Release-Com $wb }
+        }
+    } finally {
+        Release-Com $excel
     }
-    Release-Com $excel
 }
 
-Log "watchdog started interval=${IntervalSeconds}s backup=${BackupIntervalSeconds}s keep=${BackupKeepDays}d quota=${BackupMaxMB}MB minfree=${MinFreeSpaceMB}MB"
+$MaintenanceIntervalSeconds = 900
+$LastMaintenance = [datetime]::MinValue
+Log "watchdog started interval=${IntervalSeconds}s idle=${MinIdleSeconds}s foreground_idle=${ForegroundMinIdleSeconds}s backup=${BackupIntervalSeconds}s keep=${BackupKeepDays}d quota=${BackupMaxMB}MB minfree=${MinFreeSpaceMB}MB"
 while ($true) {
-    try { Save-Word } catch {}
-    try { Save-Excel } catch {}
-    try { Cleanup-Backups } catch {}
-    try { $State | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8 } catch {}
+    if (Test-SafeToProbeOffice) {
+        try { Save-Word } catch {}
+        try { Save-Excel } catch {}
+        $now = Get-Date
+        if (($now - $LastMaintenance).TotalSeconds -ge $MaintenanceIntervalSeconds) {
+            try { Cleanup-Backups } catch {}
+            $LastMaintenance = $now
+        }
+        try { $State | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8 } catch {}
+    }
     Start-Sleep -Seconds $IntervalSeconds
 }

@@ -13,8 +13,8 @@ if errorlevel 1 (
 )
 
 echo.
-echo Done. Office Local AutoSave is installed for this Windows user.
-echo It will start automatically every time this user logs in.
+echo Done. Office Local AutoSave is installed for all Windows users.
+echo It will start automatically every time any Windows user logs in.
 echo It runs in the background without showing a PowerShell window.
 echo You do not need to run this installer again after reboot.
 echo.

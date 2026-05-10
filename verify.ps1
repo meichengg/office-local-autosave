@@ -1,5 +1,5 @@
 param(
-    [int]$WaitSeconds = 20,
+    [int]$WaitSeconds = 25,
     [switch]$SkipWord,
     [switch]$SkipExcel
 )
@@ -7,8 +7,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Root = Join-Path $env:LOCALAPPDATA 'OfficeLocalAutoSave'
+$InstallRoot = Join-Path $env:ProgramData 'OfficeLocalAutoSave'
+$DataRoot = Join-Path $env:LOCALAPPDATA 'OfficeLocalAutoSave'
 $TestDir = Join-Path $env:TEMP 'OfficeLocalAutoSaveTest'
+$CurrentSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
 New-Item -ItemType Directory -Force -Path $TestDir | Out-Null
 
 function Assert($condition, $message) {
@@ -21,20 +23,20 @@ function Release-Com($obj) {
 
 function Get-WatchdogProcess {
     Get-CimInstance Win32_Process -Filter "name='powershell.exe' or name='pwsh.exe'" -ErrorAction SilentlyContinue | Where-Object {
-        $_.CommandLine -like '*OfficeLocalAutoSave.ps1*'
+        $_.SessionId -eq $CurrentSessionId -and $_.CommandLine -like '*OfficeLocalAutoSave.ps1*'
     }
 }
 
 function Test-WatchdogRunning {
-    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    $runKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
     $runValue = Get-ItemProperty -Path $runKey -Name 'OfficeLocalAutoSave' -ErrorAction SilentlyContinue
-    Assert ($null -ne $runValue) 'HKCU Run entry OfficeLocalAutoSave not found. Run install.ps1 first.'
-    Assert ($runValue.OfficeLocalAutoSave -like '*StartOfficeLocalAutoSave.vbs*') 'HKCU Run entry is old visible-console format. Run install.ps1 again.'
+    Assert ($null -ne $runValue) 'HKLM Run entry OfficeLocalAutoSave not found. Run install.ps1 first.'
+    Assert ($runValue.OfficeLocalAutoSave -like '*StartOfficeLocalAutoSave.vbs*') 'HKLM Run entry is old visible-console format. Run install.ps1 again.'
 
     $process = Get-WatchdogProcess
     if ($null -eq $process) {
-        $scriptPath = Join-Path $Root 'OfficeLocalAutoSave.ps1'
-        $launcherPath = Join-Path $Root 'StartOfficeLocalAutoSave.vbs'
+        $scriptPath = Join-Path $InstallRoot 'OfficeLocalAutoSave.ps1'
+        $launcherPath = Join-Path $InstallRoot 'StartOfficeLocalAutoSave.vbs'
         Assert (Test-Path -LiteralPath $scriptPath) "Watchdog script not found: $scriptPath"
         Assert (Test-Path -LiteralPath $launcherPath) "Hidden launcher not found: $launcherPath"
         $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
@@ -108,4 +110,4 @@ function Test-ExcelAutoSave {
 Test-WatchdogRunning
 if (-not $SkipWord) { Test-WordAutoSave }
 if (-not $SkipExcel) { Test-ExcelAutoSave }
-Write-Host "Verification completed. Log: $Root\autosave.log"
+Write-Host "Verification completed. Log: $DataRoot\autosave.log"

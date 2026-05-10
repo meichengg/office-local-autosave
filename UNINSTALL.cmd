@@ -14,6 +14,6 @@ if errorlevel 1 (
 
 echo.
 echo Done. Office Local AutoSave has been removed from startup.
-echo Existing backup/log files are kept in %%LOCALAPPDATA%%\OfficeLocalAutoSave.
+echo Existing per-user backup/log files are kept in %%LOCALAPPDATA%%\OfficeLocalAutoSave.
 echo.
 pause
